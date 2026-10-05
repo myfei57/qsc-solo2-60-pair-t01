@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class Store:
@@ -77,6 +82,18 @@ class Store:
     def close(self) -> None:
         with self._lock:
             self._save_locked()
+
+    @contextmanager
+    def transaction(self) -> "Iterator[Store]":
+        """Hold the write lock across several reads and writes.
+
+        Every write already flushes to disk atomically; this additionally makes
+        a multi-key sequence (a concentration refresh together with its audit
+        row, for example) indivisible against other threads.
+        """
+
+        with self._lock:
+            yield self
 
     def _save_locked(self) -> None:
         raw = json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True)

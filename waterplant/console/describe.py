@@ -28,4 +28,5 @@ def collect(rt: Runtime) -> dict[str, str]:
         "schedule": rt.scheduler.describe(rt.bank),
         "trend": rt.trend.describe(),
         "inventory": rt.inventory.describe(),
+        "alum": rt.alum_engine.describe(),
     }

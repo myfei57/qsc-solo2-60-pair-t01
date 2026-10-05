@@ -6,7 +6,7 @@ from waterplant.audit import Auditor
 from waterplant.backwash import Controller
 from waterplant.chlor import Doser as ChlorDoser
 from waterplant.clearwell import Well
-from waterplant.coag import Doser as CoagDoser
+from waterplant.coag import AlumEngine, Doser as CoagDoser
 from waterplant.filter import Bank
 from waterplant.flow import Calibration
 from waterplant.intake import FlowRepository, InletController, Trend
@@ -41,3 +41,19 @@ class Runtime:
         self.scheduler = Scheduler(store)
         self.trend = Trend(store)
         self.inventory = Inventory(store)
+        self._alum_engine: AlumEngine | None = None
+
+    @property
+    def alum_engine(self) -> AlumEngine:
+        """The shift-calibrated alum line, built lazily so existing callers
+        that never touch alum keep working without seeding its config."""
+
+        if self._alum_engine is None:
+            self._alum_engine = AlumEngine(self.store)
+        return self._alum_engine
+
+    def reset_alum_engine(self) -> AlumEngine:
+        """Rebuild the engine after its persisted configuration changed."""
+
+        self._alum_engine = AlumEngine(self.store)
+        return self._alum_engine

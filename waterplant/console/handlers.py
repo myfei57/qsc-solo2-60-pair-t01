@@ -18,12 +18,14 @@ from waterplant.scheduler import validate_threshold
 from waterplant.store import export_state
 
 from . import checks, history, ops
+from . import alum_handlers
 from . import describe as describe_module
 from . import simulate as simulate_module
 from . import snapshot as snapshot_module
 from . import telemetry as telemetry_module
 from .cycle import run_cycle
 from .http import Request, Response, csv_response, json_response, text_response
+from .alum_handlers import *  # noqa: F401,F403 - routes bind these as module attrs
 from .report import text_report
 from .routes import route_table
 from .system import system_payload

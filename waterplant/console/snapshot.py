@@ -28,4 +28,11 @@ def collect(rt: Runtime) -> dict[str, object]:
         "schedule": rt.scheduler.state(rt.bank).as_dict(),
         "trend": rt.trend.stats().as_dict(),
         "inventory": rt.inventory.state().as_dict(),
+        "alum": {
+            "mode": rt.alum_engine.mode_state(),
+            "concentration": rt.alum_engine.calibration.situation().as_dict(),
+            "last_decision": rt.alum_engine.last_decision(),
+            "totals": rt.alum_engine.totals(),
+            "chain": rt.alum_engine.trail.verify().as_dict(),
+        },
     }

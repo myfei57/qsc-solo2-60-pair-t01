@@ -36,4 +36,30 @@ def run_checks(rt: Runtime) -> list[dict[str, str]]:
         )
     else:
         checks.append({"name": "inventory", "status": "ok", "detail": "stock above reorder level"})
+    view = rt.alum_engine.calibration.situation()
+    if view.situation.value == "STALE":
+        checks.append(
+            {"name": "alum_concentration", "status": "warn",
+             "detail": f"strength stale, floor {view.concentration_pct:.2f}% in force"}
+        )
+    elif view.situation.value == "NONE":
+        checks.append(
+            {"name": "alum_concentration", "status": "fail",
+             "detail": "no accepted calibration, floor strength in force"}
+        )
+    else:
+        checks.append(
+            {"name": "alum_concentration", "status": "ok",
+             "detail": f"{view.situation.value} at {view.concentration_pct:.2f}%"}
+        )
+    verification = rt.alum_engine.trail.verify()
+    if verification.ok:
+        checks.append(
+            {"name": "alum_audit", "status": "ok", "detail": f"chain intact rows={verification.rows}"}
+        )
+    else:
+        checks.append(
+            {"name": "alum_audit", "status": "fail",
+             "detail": f"broken at {verification.broken_at_seq}: {verification.reason}"}
+        )
     return checks

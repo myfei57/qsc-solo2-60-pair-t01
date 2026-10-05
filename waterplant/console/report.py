@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from waterplant.ns import Stage, treatment_line
 
+from .alum import alum_dashboard
 from .describe import collect as collect_describe
 from .runtime import Runtime
 from .telemetry import collect as collect_telemetry
@@ -49,5 +50,7 @@ def text_report(rt: Runtime) -> str:
             f"inventory balance={telemetry.inventory_balance:.4f} "
             f"alerts={telemetry.inventory_alerts}"
         ),
+        "",
+        alum_dashboard(rt).rstrip("\n"),
     ]
     return "\n".join(rows) + "\n"
