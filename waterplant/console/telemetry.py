@@ -22,6 +22,10 @@ class Telemetry:
     quota_value: float
     clearwell_level: float
     coag_ratio: float
+    alum_concentration: float
+    alum_epoch: int
+    alum_pending: bool
+    alum_last_rate: float
     chlor_target: float
     turbidity_verdict: float
     ph_value: float
@@ -44,6 +48,10 @@ class Telemetry:
             "quota_value": self.quota_value,
             "clearwell_level": self.clearwell_level,
             "coag_ratio": self.coag_ratio,
+            "alum_concentration": self.alum_concentration,
+            "alum_epoch": self.alum_epoch,
+            "alum_pending": self.alum_pending,
+            "alum_last_rate": self.alum_last_rate,
             "chlor_target": self.chlor_target,
             "turbidity_verdict": self.turbidity_verdict,
             "ph_value": self.ph_value,
@@ -58,6 +66,9 @@ class Telemetry:
 def collect(rt: Runtime) -> Telemetry:
     """Read every counter without mutating the control state."""
 
+    concentration = rt.alum.ledger.current()
+    decision = rt.alum.last_decision()
+    last_rate = 0.0 if decision is None else float(decision.get("solution_rate_lph", 0.0))
     return Telemetry(
         store_keys=rt.store.count(),
         filter_beds=rt.bank.count(),
@@ -70,6 +81,10 @@ def collect(rt: Runtime) -> Telemetry:
         quota_value=rt.accumulator.value(),
         clearwell_level=rt.well.level(),
         coag_ratio=rt.coag_doser.current_ratio(),
+        alum_concentration=concentration.value,
+        alum_epoch=concentration.epoch,
+        alum_pending=concentration.pending,
+        alum_last_rate=last_rate,
         chlor_target=rt.chlor_doser.current_target(),
         turbidity_verdict=rt.sampler.state().last_verdict,
         ph_value=rt.stabilizer.current(),

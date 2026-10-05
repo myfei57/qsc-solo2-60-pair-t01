@@ -16,6 +16,7 @@ def collect(rt: Runtime) -> dict[str, str]:
         "store": describe_store(rt.store),
         "intake": rt.flow_repository.describe(),
         "coag": rt.coag_doser.describe(),
+        "alum": rt.alum.describe(),
         "chlor": rt.chlor_doser.describe(),
         "filter": rt.bank.describe(),
         "backwash": rt.backwash.describe(),

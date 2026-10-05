@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from waterplant.alum import DEFAULT_WINDOW as ALUM_DEFAULT_WINDOW
 from waterplant.chlor import validate_demand
 from waterplant.clearwell import validate_level
 from waterplant.filter import validate_zone
@@ -23,7 +24,7 @@ from . import simulate as simulate_module
 from . import snapshot as snapshot_module
 from . import telemetry as telemetry_module
 from .cycle import run_cycle
-from .http import Request, Response, csv_response, json_response, text_response
+from .http import Request, RequestError, Response, csv_response, json_response, text_response
 from .report import text_report
 from .routes import route_table
 from .system import system_payload
@@ -132,6 +133,45 @@ def coag_turbidity(server: "Server", request: Request) -> Response:
 
 def coag_ratio(server: "Server", request: Request) -> Response:
     return json_response({"ratio": server.runtime.coag_doser.current_ratio()})
+
+
+def alum_reading(server: "Server", request: Request) -> Response:
+    raw_temperature = request.payload.get("temperature")
+    temperature = None if raw_temperature is None else request.float_field("temperature")
+    decision = server.runtime.alum.dose(
+        request.float_field("flow"), request.float_field("turbidity"), temperature
+    )
+    return json_response(decision.as_dict())
+
+
+def alum_dose(server: "Server", request: Request) -> Response:
+    return json_response(server.runtime.alum.state().as_dict())
+
+
+def alum_concentration(server: "Server", request: Request) -> Response:
+    return json_response(server.runtime.alum.ledger.current().as_dict())
+
+
+def alum_refresh(server: "Server", request: Request) -> Response:
+    shift = request.str_field("shift")
+    if not shift:
+        raise RequestError(400, "shift is required")
+    raw_reading = request.payload.get("reading")
+    reading = None if raw_reading is None else request.float_field("reading")
+    outcome = server.runtime.alum.ledger.calibrate(shift, reading)
+    return json_response(outcome.as_dict())
+
+
+def alum_recover(server: "Server", request: Request) -> Response:
+    raw_reading = request.payload.get("reading")
+    reading = None if raw_reading is None else request.float_field("reading")
+    outcome = server.runtime.alum.ledger.recover(reading)
+    return json_response(outcome.as_dict())
+
+
+def alum_window(server: "Server", request: Request) -> Response:
+    window = server.runtime.alum.set_window(request.int_field("window", ALUM_DEFAULT_WINDOW))
+    return json_response({"window": window})
 
 
 def flow_replace(server: "Server", request: Request) -> Response:

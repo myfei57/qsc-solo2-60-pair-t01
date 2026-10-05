@@ -43,6 +43,7 @@ class ConsoleCase(unittest.TestCase):
             "residual",
             "quota",
             "intake",
+            "alum",
             "ph",
             "inventory",
         })
@@ -56,6 +57,7 @@ class ConsoleCase(unittest.TestCase):
                 "store",
                 "intake",
                 "coag",
+                "alum",
                 "chlor",
                 "filter",
                 "backwash",
@@ -148,6 +150,101 @@ class ConsoleCase(unittest.TestCase):
         status, body = self.call("POST", "/clearwell/level", {"target": 12.0})
         self.assertEqual(body["level"], 12.0)
         self.assertEqual(body["min_level"], 0.0)
+
+    def test_alum_routes(self) -> None:
+        status, body = self.call(
+            "POST", "/alum/reading", {"flow": 1000.0, "turbidity": 10.0, "temperature": 20.0}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "dosed")
+        self.assertEqual(body["reason"], "normal")
+        self.assertEqual(body["basis"], "window-mean")
+        self.assertEqual(body["solution_rate_lph"], 130.0)
+        self.assertEqual(body["pure_dose_mgl"], 13.0)
+        self.assertEqual(body["concentration"], 0.1)
+        self.assertEqual(body["epoch"], 1)
+
+        status, body = self.call("GET", "/alum/dose")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["pending"])
+        self.assertEqual(body["last_decision"]["solution_rate_lph"], 130.0)
+
+        status, body = self.call(
+            "POST", "/alum/concentration/refresh", {"shift": "day-1", "reading": 0.2}
+        )
+        self.assertEqual(body["status"], "confirmed")
+        self.assertEqual(body["value"], 0.2)
+        self.assertEqual(body["previous"], 0.1)
+        self.assertEqual(body["epoch"], 2)
+
+        status, body = self.call("POST", "/alum/reading", {"flow": 1000.0, "turbidity": 10.0})
+        self.assertEqual(body["solution_rate_lph"], 65.0)
+        self.assertEqual(body["concentration"], 0.2)
+        self.assertEqual(body["previous_concentration"], 0.1)
+        self.assertEqual(body["epoch"], 2)
+
+        status, body = self.call("POST", "/alum/concentration/refresh", {"shift": "night-1"})
+        self.assertEqual(body["status"], "pending")
+        self.assertEqual(body["note"], "reading-lost")
+        self.assertEqual(body["epoch"], 2)
+
+        status, body = self.call("POST", "/alum/reading", {"flow": 100.0, "turbidity": 1.0})
+        self.assertEqual(body["status"], "held")
+        self.assertEqual(body["reason"], "awaiting_confirmation")
+        self.assertEqual(body["solution_rate_lph"], 0.0)
+
+        status, body = self.call("POST", "/alum/reading", {"flow": 100.0, "turbidity": 200.0})
+        self.assertEqual(body["status"], "dosed")
+        self.assertEqual(body["reason"], "emergency_stale")
+        self.assertEqual(body["concentration"], 0.2)
+        self.assertEqual(body["solution_rate_lph"], 135.3)
+
+        status, body = self.call("POST", "/alum/concentration/recover", {})
+        self.assertTrue(body["recovered"])
+        self.assertTrue(body["changed"])
+        self.assertEqual(body["source"], "last-reading")
+        self.assertEqual(body["value"], 0.2)
+        self.assertEqual(body["epoch"], 3)
+
+        status, body = self.call("POST", "/alum/concentration/recover", {})
+        self.assertFalse(body["recovered"])
+        self.assertFalse(body["changed"])
+        self.assertEqual(body["reason"], "no-pending-calibration")
+
+        status, body = self.call("GET", "/alum/concentration")
+        self.assertFalse(body["pending"])
+        self.assertEqual(body["value"], 0.2)
+        self.assertEqual(body["epoch"], 3)
+
+        status, body = self.call("POST", "/alum/reading", {"flow": 1000.0, "turbidity": 10.0})
+        self.assertEqual(body["status"], "dosed")
+        self.assertEqual(body["reason"], "normal")
+        self.assertEqual(body["epoch"], 3)
+
+        status, alum_state = self.call("GET", "/alum/dose")
+        status, audit = self.call("POST", "/audit/filter", {"kind": "alum"})
+        audited = json.loads(audit["entries"][-1]["detail"])
+        self.assertEqual(audited, alum_state["last_decision"])
+
+        self.call("POST", "/alum/concentration/refresh", {"shift": "night-1"})
+        status, body = self.call("POST", "/alum/concentration/recover", {})
+        self.assertTrue(body["recovered"])
+        self.assertFalse(body["changed"])
+        self.assertEqual(body["epoch"], 3)
+        status, audit = self.call("POST", "/audit/filter", {"kind": "alum-recovery"})
+        self.assertEqual(len(audit["entries"]), 1)
+
+        status, body = self.call("POST", "/alum/window", {"window": 4})
+        self.assertEqual(body["window"], 4)
+        status, body = self.call("POST", "/alum/window", {"window": 0})
+        self.assertEqual(status, 400)
+        status, body = self.call("POST", "/alum/concentration/refresh", {})
+        self.assertEqual(status, 400)
+        self.assertIn("shift", body["error"])
+        status, body = self.call(
+            "POST", "/alum/concentration/refresh", {"shift": "x", "reading": 5.0}
+        )
+        self.assertEqual(status, 400)
 
     def test_filter_and_backwash_routes(self) -> None:
         for bed_id, zone, load in (("b1", 1, 4.0), ("b2", 2, 9.0), ("b3", 3, 1.0)):

@@ -16,6 +16,7 @@ def collect(rt: Runtime) -> dict[str, object]:
         "store": store_state(rt.store).as_dict(),
         "intake": rt.flow_repository.state().as_dict(),
         "coag": rt.coag_doser.state().as_dict(),
+        "alum": rt.alum.state().as_dict(),
         "chlor": rt.chlor_doser.state().as_dict(),
         "filter": rt.bank.state().as_dict(),
         "backwash": rt.backwash.state().as_dict(),

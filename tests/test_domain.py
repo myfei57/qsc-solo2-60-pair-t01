@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 
+from waterplant.alum import (
+    AlumController,
+    validate_concentration,
+    validate_temperature,
+    validate_turbidity,
+)
 from waterplant.audit import Auditor
 from waterplant.backwash import Controller
 from waterplant.chlor import Doser as ChlorDoser
@@ -163,6 +170,157 @@ class DosingCase(unittest.TestCase):
             validate_demand(-0.1)
         with self.assertRaises(ValueError):
             validate_demand(2000.0)
+
+
+class AlumCase(unittest.TestCase):
+    def test_dose_follows_flow_turbidity_and_concentration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            decision = controller.dose(1000.0, 10.0, 20.0)
+            self.assertEqual(decision.status, "dosed")
+            self.assertEqual(decision.reason, "normal")
+            self.assertEqual(decision.basis, "window-mean")
+            self.assertEqual(decision.solution_rate_lph, 130.0)
+            self.assertEqual(decision.pure_dose_mgl, 13.0)
+            self.assertEqual(decision.concentration, 0.1)
+            self.assertIn("alum", controller.describe())
+
+    def test_dose_uses_window_mean_not_instantaneous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            controller.dose(1000.0, 0.0, 20.0)
+            decision = controller.dose(500.0, 0.0, 20.0)
+            self.assertEqual(decision.flow_mean, 750.0)
+            self.assertEqual(decision.samples, 2)
+            self.assertEqual(decision.solution_rate_lph, 37.5)
+
+    def test_cold_water_raises_the_dose(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            decision = controller.dose(1000.0, 10.0, 5.0)
+            self.assertEqual(decision.temp_factor, 1.45)
+            self.assertEqual(decision.pure_dose_mgl, 18.85)
+            self.assertEqual(decision.solution_rate_lph, 188.5)
+
+    def test_refresh_orders_before_the_next_dose(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            first = controller.dose(1000.0, 10.0, 20.0)
+            self.assertEqual(first.epoch, 0)
+            outcome = controller.ledger.calibrate("shift-a", 0.2)
+            self.assertEqual(outcome.status, "confirmed")
+            self.assertEqual(outcome.epoch, 1)
+            second = controller.dose(1000.0, 10.0, 20.0)
+            self.assertEqual(second.epoch, 1)
+            self.assertEqual(second.concentration, 0.2)
+            self.assertEqual(second.previous_concentration, 0.1)
+            self.assertEqual(second.solution_rate_lph, 65.0)
+
+    def test_lost_reading_holds_normal_dosing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            outcome = controller.ledger.calibrate("shift-b", None)
+            self.assertEqual(outcome.status, "pending")
+            self.assertTrue(controller.ledger.current().pending)
+            decision = controller.dose(100.0, 1.0, 20.0)
+            self.assertEqual(decision.status, "held")
+            self.assertEqual(decision.reason, "awaiting_confirmation")
+            self.assertEqual(decision.solution_rate_lph, 0.0)
+
+    def test_emergency_doses_on_stale_concentration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            controller.ledger.calibrate("shift-b", None)
+            decision = controller.dose(100.0, 60.0, 20.0)
+            self.assertEqual(decision.status, "dosed")
+            self.assertEqual(decision.reason, "emergency_stale")
+            self.assertEqual(decision.concentration, 0.1)
+            self.assertEqual(decision.solution_rate_lph, 53.0)
+
+    def test_recovery_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            auditor = Auditor(store)
+            controller.ledger.calibrate("s1", None)
+            first = controller.ledger.recover()
+            self.assertTrue(first.recovered)
+            self.assertTrue(first.changed)
+            self.assertEqual(first.source, "default")
+            self.assertEqual(first.epoch, 1)
+            second = controller.ledger.recover()
+            self.assertFalse(second.recovered)
+            self.assertFalse(second.changed)
+            controller.ledger.calibrate("s1", None)
+            third = controller.ledger.recover()
+            self.assertTrue(third.recovered)
+            self.assertFalse(third.changed)
+            self.assertEqual(third.epoch, 1)
+            self.assertFalse(controller.ledger.current().pending)
+            self.assertEqual(len(auditor.filter("alum-recovery")), 1)
+
+    def test_recovery_prefers_resubmitted_then_last_reading(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            controller.ledger.calibrate("s1", None)
+            resubmitted = controller.ledger.recover(0.25)
+            self.assertEqual(resubmitted.source, "resubmitted")
+            self.assertEqual(controller.ledger.current().value, 0.25)
+            controller.ledger.calibrate("s2", 0.3)
+            controller.ledger.calibrate("s3", None)
+            fallback = controller.ledger.recover()
+            self.assertEqual(fallback.source, "last-reading")
+            self.assertEqual(fallback.value, 0.3)
+
+    def test_lost_report_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            auditor = Auditor(store)
+            controller.ledger.calibrate("s1", None)
+            again = controller.ledger.calibrate("s1", None)
+            self.assertEqual(again.note, "already-pending")
+            self.assertEqual(len(auditor.filter("alum-calibration-lost")), 1)
+
+    def test_audit_matches_the_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            auditor = Auditor(store)
+            decision = controller.dose(1000.0, 10.0, 20.0)
+            entry = auditor.last()
+            self.assertEqual(entry.kind, "alum")
+            self.assertEqual(json.loads(entry.detail), decision.as_dict())
+            self.assertEqual(controller.last_decision(), decision.as_dict())
+
+    def test_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            controller = AlumController(store)
+            validate_concentration(0.1)
+            validate_turbidity(0.0)
+            validate_temperature(20.0)
+            with self.assertRaises(ValueError):
+                validate_concentration(0.0)
+            with self.assertRaises(ValueError):
+                validate_concentration(0.6)
+            with self.assertRaises(ValueError):
+                validate_turbidity(-1.0)
+            with self.assertRaises(ValueError):
+                validate_temperature(60.0)
+            with self.assertRaises(ValueError):
+                controller.dose(-1.0, 0.0)
+            with self.assertRaises(ValueError):
+                controller.set_window(0)
+            with self.assertRaises(ValueError):
+                controller.ledger.calibrate("s1", 5.0)
 
 
 class TurbidityCase(unittest.TestCase):

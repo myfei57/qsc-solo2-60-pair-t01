@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from waterplant.alum import AlumController
 from waterplant.audit import Auditor
 from waterplant.backwash import Controller
 from waterplant.chlor import Doser as ChlorDoser
@@ -29,6 +30,7 @@ class Runtime:
         self.inlet = InletController()
         self.outlet = InletController()
         self.coag_doser = coag_doser
+        self.alum = AlumController(store)
         self.chlor_doser = ChlorDoser(store)
         self.bank = bank
         self.backwash = Controller(bank, store)

@@ -25,6 +25,10 @@ def run_checks(rt: Runtime) -> list[dict[str, str]]:
         checks.append({"name": "intake", "status": "ok", "detail": "flow reading present"})
     else:
         checks.append({"name": "intake", "status": "warn", "detail": "no flow reading yet"})
+    if rt.alum.ledger.current().pending:
+        checks.append({"name": "alum", "status": "warn", "detail": "calibration reading lost"})
+    else:
+        checks.append({"name": "alum", "status": "ok", "detail": "concentration confirmed"})
     if rt.stabilizer.is_stable():
         checks.append({"name": "ph", "status": "ok", "detail": "ph in the stable band"})
     else:

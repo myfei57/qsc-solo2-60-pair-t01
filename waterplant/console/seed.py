@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from waterplant.alum import AlumController
 from waterplant.clearwell import Well
 from waterplant.flow import Calibration
 from waterplant.intake import DEFAULT_WINDOW, WINDOW_KEY, FlowRepository, Trend
@@ -42,5 +43,7 @@ def seed_defaults(store: Store) -> None:
     trend = Trend(store)
     if not has_key(store, WINDOW_KEY):
         trend.set_window(DEFAULT_WINDOW)
+
+    AlumController(store).ensure_defaults()
 
     append_event(store, EVENT_KEY, "seed", "defaults")
